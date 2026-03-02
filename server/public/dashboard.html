@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NDI Remote Viewer - Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">NDI Remote Viewer</div>
+    <div class="nav-right">
+      <span id="userInfo" class="nav-user"></span>
+      <button id="adminBtn" class="btn btn-small" hidden>Users</button>
+      <button id="logoutBtn" class="btn btn-small btn-outline">Logout</button>
+    </div>
+  </nav>
+
+  <div class="dashboard">
+    <aside class="sidebar">
+      <h2>NDI Sources</h2>
+      <div id="agentStatus" class="agent-status disconnected">Agent: Disconnected</div>
+      <ul id="sourceList" class="source-list">
+        <li class="source-empty">No sources available</li>
+      </ul>
+    </aside>
+
+    <main class="main-content">
+      <div id="playerContainer" class="player-container">
+        <div id="playerPlaceholder" class="player-placeholder">
+          <p>Select an NDI source to start viewing</p>
+        </div>
+        <video id="videoPlayer" hidden></video>
+        <div id="playerOverlay" class="player-overlay" hidden>
+          <span id="streamInfo"></span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Admin Modal -->
+  <div id="adminModal" class="modal" hidden>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>User Management</h2>
+        <button class="modal-close" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="addUserForm" class="add-user-form">
+          <input type="text" id="newUsername" placeholder="Username" required>
+          <input type="password" id="newPassword" placeholder="Password" required>
+          <select id="newRole">
+            <option value="viewer">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button type="submit" class="btn">Add User</button>
+        </form>
+        <ul id="userList" class="user-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
+  <script src="/js/player.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
