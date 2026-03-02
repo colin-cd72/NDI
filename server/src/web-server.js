@@ -87,7 +87,8 @@ function createApp() {
       return res.status(403).json({ error: 'You do not have access to this source' });
     }
 
-    const result = streamController.requestStream(sourceId, req.session.userId);
+    const viewerId = req.sessionID || req.session.userId;
+    const result = streamController.requestStream(sourceId, viewerId);
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
     }
@@ -99,7 +100,8 @@ function createApp() {
     if (!sourceId) {
       return res.status(400).json({ error: 'sourceId required' });
     }
-    streamController.releaseStream(sourceId, req.session.userId);
+    const viewerId = req.sessionID || req.session.userId;
+    streamController.releaseStream(sourceId, viewerId);
     res.json({ ok: true });
   });
 

@@ -1,7 +1,7 @@
 // Track NDI sources reported by agent, active streams, and viewer counts.
 
 const sources = new Map();       // sourceId -> { name, status }
-const activeStreams = new Map();  // sourceId -> { viewers: Set<userId>, streamPath, graceTimer }
+const activeStreams = new Map();  // sourceId -> { viewers: Set<viewerId>, streamPath, graceTimer }
 const GRACE_PERIOD_MS = 30000;   // 30s before stopping an unwatched stream
 
 let agentWs = null;              // Reference to the agent WebSocket (set by ws-server)
