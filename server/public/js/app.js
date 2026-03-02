@@ -33,6 +33,7 @@
   const player = new NDIPlayer(videoEl);
   let activeSourceId = null;
   let sources = [];
+  let switchGeneration = 0; // Guards against overlapping toggleSource calls
 
   // WebSocket connection for viewer messages
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -104,8 +105,11 @@
       return;
     }
 
+    // Sort by name so the list never reorders between renders
+    const sorted = [...sources].sort((a, b) => a.name.localeCompare(b.name));
+
     sourceList.innerHTML = '';
-    for (const src of sources) {
+    for (const src of sorted) {
       const li = document.createElement('li');
       li.className = 'source-item' + (src.id === activeSourceId ? ' active' : '');
       li.innerHTML = `
@@ -133,15 +137,24 @@
       return;
     }
 
+    // Increment generation to invalidate any in-flight switch
+    const thisGen = ++switchGeneration;
+
     // Stop current stream if any
     if (activeSourceId) {
+      const stopId = activeSourceId;
+      activeSourceId = null;
+      player.stop();
+      renderSources();
       await fetch('/api/stream/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceId: activeSourceId })
+        body: JSON.stringify({ sourceId: stopId })
       });
-      player.stop();
     }
+
+    // Bail if another click superseded this one
+    if (thisGen !== switchGeneration) return;
 
     // Start new stream
     try {
@@ -150,6 +163,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceId: src.id })
       });
+
+      // Bail if superseded while waiting for API response
+      if (thisGen !== switchGeneration) return;
+
       const data = await res.json();
 
       if (!res.ok) {

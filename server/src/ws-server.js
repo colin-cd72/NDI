@@ -162,7 +162,7 @@ function broadcastToViewers(msg) {
       client.send(JSON.stringify({ type: 'sources', sources: filtered }));
     } else if (msg.type === 'stream-status' || msg.type === 'stream-error') {
       if (!userCanAccessSource(client.userId, msg.sourceId)) continue;
-      console.log(`[WS] Sending ${msg.type} (${msg.sourceId}) to viewer ${client.username} (uid:${client.userId})`);
+      // Debug: console.log(`[WS] Sending ${msg.type} (${msg.sourceId}) to viewer ${client.username} (uid:${client.userId})`);
       client.send(JSON.stringify(msg));
     } else {
       client.send(JSON.stringify(msg));
