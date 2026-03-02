@@ -88,6 +88,7 @@ function createApp() {
     }
 
     const viewerId = req.sessionID || req.session.userId;
+    console.log(`[API] stream/start: user=${req.session.username} sourceId=${sourceId} viewerId=${viewerId}`);
     const result = streamController.requestStream(sourceId, viewerId);
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
@@ -101,6 +102,7 @@ function createApp() {
       return res.status(400).json({ error: 'sourceId required' });
     }
     const viewerId = req.sessionID || req.session.userId;
+    console.log(`[API] stream/stop: user=${req.session.username} sourceId=${sourceId} viewerId=${viewerId}`);
     streamController.releaseStream(sourceId, viewerId);
     res.json({ ok: true });
   });
