@@ -19,6 +19,14 @@ function init() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Migration: add allowed_sources column
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN allowed_sources TEXT DEFAULT NULL`);
+  } catch (e) {
+    // Column already exists — ignore
+  }
+
   return db;
 }
 
@@ -45,12 +53,23 @@ async function verifyPassword(username, password) {
 }
 
 function getUser(id) {
-  const user = db.prepare('SELECT id, username, email, role, created_at FROM users WHERE id = ?').get(id);
+  const user = db.prepare('SELECT id, username, email, role, allowed_sources, created_at FROM users WHERE id = ?').get(id);
   return user || null;
 }
 
 function getAllUsers() {
-  return db.prepare('SELECT id, username, email, role, created_at FROM users').all();
+  return db.prepare('SELECT id, username, email, role, allowed_sources, created_at FROM users').all();
+}
+
+function updateAllowedSources(userId, sources) {
+  const value = sources === null ? null : JSON.stringify(sources);
+  db.prepare('UPDATE users SET allowed_sources = ? WHERE id = ?').run(value, userId);
+}
+
+function getAllowedSources(userId) {
+  const row = db.prepare('SELECT allowed_sources FROM users WHERE id = ?').get(userId);
+  if (!row || row.allowed_sources === null) return null;
+  return JSON.parse(row.allowed_sources);
 }
 
 function deleteUser(id) {
@@ -58,4 +77,4 @@ function deleteUser(id) {
   return result.changes > 0;
 }
 
-module.exports = { init, hasUsers, createUser, verifyPassword, getUser, getAllUsers, deleteUser };
+module.exports = { init, hasUsers, createUser, verifyPassword, getUser, getAllUsers, deleteUser, updateAllowedSources, getAllowedSources };

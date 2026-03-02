@@ -20,6 +20,7 @@ router.post('/login', async (req, res) => {
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.role = user.role;
+    console.log(`[Auth] Login success: ${user.username} (${user.role})`);
     res.json({ user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) {
     console.error('Login error:', err);
@@ -68,6 +69,7 @@ router.post('/setup', async (req, res) => {
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.role = user.role;
+    console.log(`[Auth] Setup success: ${user.username} (${user.role})`);
     res.json({ user: { id: user.id, username: user.username, role: user.role } });
   } catch (err) {
     if (err.message && err.message.includes('UNIQUE')) {
@@ -106,6 +108,26 @@ router.post('/users', requireAdmin, async (req, res) => {
 router.get('/users', requireAdmin, (req, res) => {
   const users = userStore.getAllUsers();
   res.json({ users });
+});
+
+// PUT /auth/users/:id/sources — admin sets allowed sources
+router.put('/users/:id/sources', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const user = userStore.getUser(id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const { allowedSources } = req.body;
+  if (allowedSources !== null && !Array.isArray(allowedSources)) {
+    return res.status(400).json({ error: 'allowedSources must be null or an array of strings' });
+  }
+  if (Array.isArray(allowedSources) && !allowedSources.every(s => typeof s === 'string')) {
+    return res.status(400).json({ error: 'allowedSources array must contain only strings' });
+  }
+
+  userStore.updateAllowedSources(id, allowedSources);
+  res.json({ ok: true });
 });
 
 // DELETE /auth/users/:id — admin deletes user

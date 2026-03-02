@@ -1,148 +1,74 @@
-const { execSync } = require('child_process');
+// NDI source discovery using the NDI SDK via koffi FFI
+const crypto = require('crypto');
+const ndi = require('./ndi-native');
 
-let grandiose = null;
-try {
-  grandiose = require('grandiose');
-  console.log('[NDI] Grandiose loaded — full NDI discovery available');
-} catch (err) {
-  console.log('[NDI] Grandiose not available, using FFmpeg/DirectShow fallback');
+let finder = null;
+let firstDiscovery = true;
+
+function ensureFinder() {
+  if (!finder) {
+    finder = ndi.NDIlib_find_create_v2({
+      show_local_sources: true,
+      p_groups: null,
+      p_extra_ips: null
+    });
+    if (!finder) {
+      throw new Error('Failed to create NDI finder');
+    }
+    console.log('[NDI] Finder created');
+  }
+  return finder;
 }
 
 async function discoverSources() {
-  if (grandiose) {
-    return discoverWithGrandiose();
-  }
-  return discoverWithFFmpeg();
-}
-
-async function discoverWithGrandiose() {
   try {
-    const sources = await grandiose.find({ showLocalSources: true, waitTime: 3000 });
-    return sources.map((s, i) => ({
-      id: `ndi_${i}`,
-      name: s.name,
-      urlAddress: s.urlAddress,
-      type: 'grandiose'
-    }));
+    const f = ensureFinder();
+
+    // On first discovery, wait longer to find more sources
+    // On subsequent calls, wait briefly (returns early if no change)
+    if (firstDiscovery) {
+      for (let i = 0; i < 5; i++) {
+        ndi.NDIlib_find_wait_for_sources(f, 2000);
+      }
+      firstDiscovery = false;
+    } else {
+      ndi.NDIlib_find_wait_for_sources(f, 500);
+    }
+
+    // Get current source list
+    const countBuf = [0];
+    const sourcesPtr = ndi.NDIlib_find_get_current_sources(f, countBuf);
+    const count = countBuf[0];
+
+    if (count === 0 || !sourcesPtr) {
+      return [];
+    }
+
+    const rawSources = ndi.koffi.decode(sourcesPtr, 'NDIlib_source_t', count);
+
+    return rawSources
+      .filter(s => {
+        // Skip audio-only sources (e.g., "vMix Audio - Bus A")
+        const name = s.p_ndi_name.toLowerCase();
+        return !name.includes('audio');
+      })
+      .map(s => ({
+        id: `ndi_${crypto.createHash('md5').update(s.p_ndi_name).digest('hex').slice(0, 12)}`,
+        name: s.p_ndi_name,
+        urlAddress: s.p_url_address,
+        type: 'ndi'
+      }));
   } catch (err) {
-    console.error('[NDI] Grandiose discovery error:', err.message);
+    console.error('[NDI] Discovery error:', err.message);
     return [];
   }
 }
 
-function discoverWithFFmpeg() {
-  const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-  try {
-    // List DirectShow devices — FFmpeg outputs to stderr
-    const output = execSync(
-      `"${ffmpegPath}" -list_devices true -f dshow -i dummy 2>&1`,
-      { encoding: 'utf8', timeout: 10000 }
-    ).toString();
-
-    const sources = [];
-    const lines = output.split('\n');
-    let isVideo = false;
-
-    for (const line of lines) {
-      // DirectShow section headers
-      if (line.includes('DirectShow video devices')) {
-        isVideo = true;
-        continue;
-      }
-      if (line.includes('DirectShow audio devices')) {
-        isVideo = false;
-        continue;
-      }
-
-      if (isVideo) {
-        // Match device names: [dshow @ ...] "Device Name"
-        const match = line.match(/\]\s+"(.+)"/);
-        if (match) {
-          const name = match[1];
-          // Look for NDI-related virtual cameras
-          if (name.toLowerCase().includes('ndi')) {
-            sources.push({
-              id: `dshow_${sources.length}`,
-              name: name,
-              deviceName: name,
-              type: 'dshow'
-            });
-          }
-        }
-      }
-    }
-
-    // If no NDI-specific devices found, list all video devices
-    // (user might have NDI Webcam Video mapped)
-    if (sources.length === 0) {
-      let isVid = false;
-      for (const line of lines) {
-        if (line.includes('DirectShow video devices')) {
-          isVid = true;
-          continue;
-        }
-        if (line.includes('DirectShow audio devices')) {
-          isVid = false;
-          continue;
-        }
-        if (isVid) {
-          const match = line.match(/\]\s+"(.+)"/);
-          if (match && !match[1].includes('Alternative name')) {
-            sources.push({
-              id: `dshow_${sources.length}`,
-              name: match[1],
-              deviceName: match[1],
-              type: 'dshow'
-            });
-          }
-        }
-      }
-    }
-
-    return sources;
-  } catch (err) {
-    // FFmpeg -list_devices exits with non-zero, but output is in the error
-    const output = err.stdout || err.stderr || '';
-    if (typeof output === 'string' && output.includes('DirectShow')) {
-      // Re-parse from error output
-      return parseFFmpegDeviceOutput(output);
-    }
-    console.error('[NDI] FFmpeg discovery error:', err.message);
-    return [];
+function destroyFinder() {
+  if (finder) {
+    ndi.NDIlib_find_destroy(finder);
+    finder = null;
   }
 }
 
-function parseFFmpegDeviceOutput(output) {
-  const sources = [];
-  const lines = output.split('\n');
-  let isVideo = false;
-
-  for (const line of lines) {
-    if (line.includes('DirectShow video devices')) {
-      isVideo = true;
-      continue;
-    }
-    if (line.includes('DirectShow audio devices')) {
-      isVideo = false;
-      continue;
-    }
-    if (isVideo) {
-      const match = line.match(/\]\s+"(.+)"/);
-      if (match) {
-        const name = match[1];
-        if (!name.startsWith('@device')) {
-          sources.push({
-            id: `dshow_${sources.length}`,
-            name: name,
-            deviceName: name,
-            type: 'dshow'
-          });
-        }
-      }
-    }
-  }
-
-  return sources;
-}
-
-module.exports = { discoverSources };
+module.exports = { discoverSources, destroyFinder };

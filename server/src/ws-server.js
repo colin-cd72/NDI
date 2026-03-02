@@ -2,6 +2,7 @@ const { WebSocketServer } = require('ws');
 const url = require('url');
 const cookie = require('cookie');
 const streamController = require('./stream-controller');
+const userStore = require('./auth/user-store');
 
 const viewerClients = new Set();
 
@@ -53,9 +54,11 @@ function handleAgentUpgrade(wss, request, socket, head) {
 
     ws.on('close', () => {
       console.log('[WS] Agent disconnected');
-      streamController.setAgentWs(null);
-      // Notify viewers that sources are gone
-      broadcastToViewers({ type: 'sources', sources: [] });
+      // Only clear if this is still the active agent (not a stale connection)
+      if (streamController.getAgentWs() === ws) {
+        streamController.setAgentWs(null);
+        broadcastToViewers({ type: 'sources', sources: [] });
+      }
     });
   });
 }
@@ -123,10 +126,11 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
 
       console.log(`[WS] Viewer connected: ${ws.username}`);
 
-      // Send current sources immediately
+      // Send current sources immediately (filtered per user)
+      const allSources = streamController.getSources();
       ws.send(JSON.stringify({
         type: 'sources',
-        sources: streamController.getSources()
+        sources: filterSourcesForUser(ws.userId, allSources)
       }));
 
       ws.on('close', () => {
@@ -137,11 +141,30 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
   });
 }
 
+function filterSourcesForUser(userId, sources) {
+  const allowed = userStore.getAllowedSources(userId);
+  if (allowed === null) return sources;
+  return sources.filter(s => allowed.includes(s.id));
+}
+
+function userCanAccessSource(userId, sourceId) {
+  const allowed = userStore.getAllowedSources(userId);
+  if (allowed === null) return true;
+  return allowed.includes(sourceId);
+}
+
 function broadcastToViewers(msg) {
-  const data = JSON.stringify(msg);
   for (const client of viewerClients) {
-    if (client.readyState === 1) {
-      client.send(data);
+    if (client.readyState !== 1) continue;
+
+    if (msg.type === 'sources') {
+      const filtered = filterSourcesForUser(client.userId, msg.sources);
+      client.send(JSON.stringify({ type: 'sources', sources: filtered }));
+    } else if (msg.type === 'stream-status' || msg.type === 'stream-error') {
+      if (!userCanAccessSource(client.userId, msg.sourceId)) continue;
+      client.send(JSON.stringify(msg));
+    } else {
+      client.send(JSON.stringify(msg));
     }
   }
 }

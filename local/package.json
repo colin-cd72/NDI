@@ -8,9 +8,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
+    "koffi": "^2.9.0",
     "ws": "^8.18.0"
-  },
-  "optionalDependencies": {
-    "grandiose": "^0.3.1"
   }
 }

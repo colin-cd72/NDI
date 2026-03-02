@@ -7,6 +7,7 @@ const userStore = require('./auth/user-store');
 const { createApp } = require('./web-server');
 const { createMediaServer } = require('./media-server');
 const { createWsServer, startHeartbeat } = require('./ws-server');
+const bandwidthMonitor = require('./bandwidth-monitor');
 
 // Ensure db directory exists
 const dbDir = path.join(__dirname, '..', 'db');
@@ -32,6 +33,9 @@ const nms = createMediaServer();
 nms.run();
 console.log(`[RTMP] Listening on port ${process.env.RTMP_PORT || 1935}`);
 console.log(`[FLV] HTTP-FLV on port ${process.env.HTTP_FLV_PORT || 8000}`);
+
+// Start bandwidth monitor
+bandwidthMonitor.start();
 
 // Start HTTP server
 const PORT = parseInt(process.env.PORT) || 3434;

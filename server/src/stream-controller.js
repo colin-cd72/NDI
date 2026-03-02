@@ -10,6 +10,10 @@ function setAgentWs(ws) {
   agentWs = ws;
 }
 
+function getAgentWs() {
+  return agentWs;
+}
+
 function updateSources(sourceList) {
   // sourceList: [{ id, name }]
   sources.clear();
@@ -120,6 +124,7 @@ function getActiveStreams() {
 
 module.exports = {
   setAgentWs,
+  getAgentWs,
   updateSources,
   getSources,
   requestStream,

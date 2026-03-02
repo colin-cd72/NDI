@@ -1,15 +1,20 @@
 const express = require('express');
 const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
+const BetterSQLiteStore = require('./session-store');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const authRoutes = require('./auth/auth-routes');
-const { requireAuth } = require('./auth/auth-middleware');
+const { requireAuth, requireAdmin } = require('./auth/auth-middleware');
 const streamController = require('./stream-controller');
+const userStore = require('./auth/user-store');
+const bandwidthMonitor = require('./bandwidth-monitor');
 
 function createApp() {
   const app = express();
+
+  // Trust nginx proxy (required for secure cookies + rate limiter behind reverse proxy)
+  app.set('trust proxy', 1);
 
   // Security headers (relaxed CSP for video player)
   app.use(helmet({
@@ -28,9 +33,9 @@ function createApp() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
-  // Session store
+  // Session store (synchronous better-sqlite3)
   const sessionMiddleware = session({
-    store: new SQLiteStore({
+    store: new BetterSQLiteStore({
       dir: path.join(__dirname, '..', 'db'),
       db: 'sessions.db'
     }),
@@ -62,7 +67,12 @@ function createApp() {
 
   // Stream API
   app.get('/api/sources', requireAuth, (req, res) => {
-    res.json({ sources: streamController.getSources() });
+    const allSources = streamController.getSources();
+    const allowed = userStore.getAllowedSources(req.session.userId);
+    if (allowed === null) {
+      return res.json({ sources: allSources });
+    }
+    res.json({ sources: allSources.filter(s => allowed.includes(s.id)) });
   });
 
   app.post('/api/stream/start', requireAuth, (req, res) => {
@@ -70,6 +80,13 @@ function createApp() {
     if (!sourceId) {
       return res.status(400).json({ error: 'sourceId required' });
     }
+
+    // Check source access permission
+    const allowed = userStore.getAllowedSources(req.session.userId);
+    if (allowed !== null && !allowed.includes(sourceId)) {
+      return res.status(403).json({ error: 'You do not have access to this source' });
+    }
+
     const result = streamController.requestStream(sourceId, req.session.userId);
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
@@ -84,6 +101,11 @@ function createApp() {
     }
     streamController.releaseStream(sourceId, req.session.userId);
     res.json({ ok: true });
+  });
+
+  // Admin bandwidth API
+  app.get('/api/admin/bandwidth', requireAdmin, (req, res) => {
+    res.json(bandwidthMonitor.getSnapshot());
   });
 
   // Static files

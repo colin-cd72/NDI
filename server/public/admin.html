@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NDI Remote Viewer - Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">NDI Remote Viewer</div>
+    <div class="nav-right">
+      <a href="/dashboard.html" class="btn btn-small btn-outline">Dashboard</a>
+      <span id="userInfo" class="nav-user"></span>
+      <button id="logoutBtn" class="btn btn-small btn-outline">Logout</button>
+    </div>
+  </nav>
+
+  <div class="admin-page">
+    <!-- Summary Cards -->
+    <div class="bw-summary">
+      <div class="bw-card">
+        <div class="bw-card-label">Server Inbound</div>
+        <div class="bw-card-value" id="rxBps">--</div>
+      </div>
+      <div class="bw-card">
+        <div class="bw-card-label">Server Outbound</div>
+        <div class="bw-card-value" id="txBps">--</div>
+      </div>
+      <div class="bw-card">
+        <div class="bw-card-label">Active Streams</div>
+        <div class="bw-card-value" id="activeStreams">0</div>
+      </div>
+      <div class="bw-card">
+        <div class="bw-card-label">Total Viewers</div>
+        <div class="bw-card-value" id="totalViewers">0</div>
+      </div>
+    </div>
+
+    <!-- Bandwidth Chart -->
+    <div class="bw-chart-container">
+      <h3>Bandwidth (last 5 min)</h3>
+      <canvas id="bwChart"></canvas>
+    </div>
+
+    <!-- Stream Table -->
+    <div class="bw-table-container">
+      <h3>Active Streams</h3>
+      <table class="bw-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Viewers</th>
+            <th>Inbound</th>
+            <th>Outbound</th>
+          </tr>
+        </thead>
+        <tbody id="streamTableBody">
+          <tr><td colspan="4" class="bw-table-empty">No active streams</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- User Management -->
+    <div class="bw-table-container">
+      <h3>User Management</h3>
+      <form id="addUserForm" class="add-user-form" style="margin-bottom: 1rem;">
+        <input type="text" id="newUsername" placeholder="Username" required>
+        <input type="password" id="newPassword" placeholder="Password" required>
+        <select id="newRole">
+          <option value="viewer">Viewer</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="submit" class="btn">Add User</button>
+      </form>
+      <ul id="userList" class="user-list"></ul>
+    </div>
+  </div>
+
+  <!-- Source Permissions Modal -->
+  <div id="sourcesModal" class="modal" hidden>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Source Access — <span id="sourcesModalUser"></span></h2>
+        <button class="modal-close" id="sourcesModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="source-checkbox-row">
+          <input type="checkbox" id="allowAllCheckbox"> Allow all sources
+        </label>
+        <div id="sourceCheckboxes" class="source-checkboxes"></div>
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+          <button id="sourcesModalSave" class="btn">Save</button>
+          <button id="sourcesModalCancel" class="btn btn-outline">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

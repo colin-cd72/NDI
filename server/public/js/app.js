@@ -23,11 +23,6 @@
   const playerPlaceholder = document.getElementById('playerPlaceholder');
   const playerOverlay = document.getElementById('playerOverlay');
   const streamInfo = document.getElementById('streamInfo');
-  const adminModal = document.getElementById('adminModal');
-  const closeModal = document.getElementById('closeModal');
-  const addUserForm = document.getElementById('addUserForm');
-  const userList = document.getElementById('userList');
-
   userInfo.textContent = currentUser.username;
   if (currentUser.role === 'admin') {
     adminBtn.hidden = false;
@@ -39,8 +34,10 @@
   let activeSourceId = null;
   let sources = [];
 
-  // WebSocket connection
+  // WebSocket connection for viewer messages
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // HTTP-FLV uses regular HTTP(S) protocol
+  const httpProtocol = location.protocol;
   let ws;
   let wsReconnectTimer;
 
@@ -163,8 +160,9 @@
       activeSourceId = src.id;
       playerPlaceholder.hidden = true;
 
-      // Build the FLV URL for mpegts.js
-      const flvUrl = `${protocol}//${location.host}/live${data.streamPath}.flv`;
+      // Build the FLV URL for mpegts.js (HTTP-FLV over HTTPS)
+      // streamPath is already "/live/KEY_sourceId", so just append .flv
+      const flvUrl = `${httpProtocol}//${location.host}${data.streamPath}.flv`;
       player.play(flvUrl, src.name);
 
       streamInfo.textContent = src.name;
@@ -202,88 +200,44 @@
     window.location.href = '/';
   });
 
-  // Admin modal
-  adminBtn.addEventListener('click', () => {
-    adminModal.hidden = false;
-    loadUsers();
-  });
-
-  closeModal.addEventListener('click', () => {
-    adminModal.hidden = true;
-  });
-
-  adminModal.addEventListener('click', (e) => {
-    if (e.target === adminModal) adminModal.hidden = true;
-  });
-
-  addUserForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const username = document.getElementById('newUsername').value.trim();
-    const password = document.getElementById('newPassword').value;
-    const role = document.getElementById('newRole').value;
-
-    if (!username || !password) return;
-
-    try {
-      const res = await fetch('/auth/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, role })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to create user');
-        return;
-      }
-      addUserForm.reset();
-      loadUsers();
-    } catch (err) {
-      alert('Failed to create user');
-    }
-  });
-
-  async function loadUsers() {
-    try {
-      const res = await fetch('/auth/users');
-      const data = await res.json();
-      renderUsers(data.users || []);
-    } catch (err) {
-      console.error('Failed to load users:', err);
-    }
-  }
-
-  function renderUsers(users) {
-    userList.innerHTML = '';
-    for (const u of users) {
-      const li = document.createElement('li');
-      li.innerHTML = `
-        <div class="user-info">
-          <span>${escapeHtml(u.username)}</span>
-          <span class="user-role ${u.role}">${u.role}</span>
-        </div>
-        ${u.id !== currentUser.id ? `<button class="btn btn-small btn-danger" data-id="${u.id}">Delete</button>` : '<span style="color:var(--text-secondary);font-size:0.8rem">you</span>'}
-      `;
-      const delBtn = li.querySelector('[data-id]');
-      if (delBtn) {
-        delBtn.addEventListener('click', async () => {
-          if (!confirm(`Delete user "${u.username}"?`)) return;
-          try {
-            await fetch(`/auth/users/${u.id}`, { method: 'DELETE' });
-            loadUsers();
-          } catch (err) {
-            alert('Failed to delete user');
-          }
-        });
-      }
-      userList.appendChild(li);
-    }
-  }
-
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // Fullscreen
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const playerContainer = document.getElementById('playerContainer');
+
+  fullscreenBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      playerContainer.requestFullscreen().catch(err => {
+        console.error('Fullscreen error:', err);
+      });
+    }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) {
+      fullscreenBtn.title = 'Exit Fullscreen';
+      fullscreenBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>';
+    } else {
+      fullscreenBtn.title = 'Fullscreen';
+      fullscreenBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>';
+    }
+  });
+
+  // Double-click video to toggle fullscreen
+  videoEl.addEventListener('dblclick', () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      playerContainer.requestFullscreen().catch(() => {});
+    }
+  });
 
   // Clean up on page unload
   window.addEventListener('beforeunload', () => {

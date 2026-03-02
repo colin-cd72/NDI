@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { discoverSources } = require('./ndi-discovery');
+const { discoverSources, destroyFinder } = require('./ndi-discovery');
 const streamManager = require('./stream-manager');
 const AgentWsClient = require('./ws-client');
 
@@ -30,6 +30,14 @@ wsClient.onStartStream = (sourceId, streamKey) => {
 wsClient.onStopStream = (sourceId) => {
   streamManager.stopStream(sourceId);
   wsClient.sendStreamStopped(sourceId);
+};
+
+// Re-send sources whenever we reconnect
+wsClient.onConnected = () => {
+  if (knownSources.length > 0) {
+    console.log(`[Agent] Re-sending ${knownSources.length} sources after reconnect`);
+    wsClient.sendSources(knownSources);
+  }
 };
 
 // Discovery loop
@@ -66,6 +74,7 @@ setInterval(discoveryLoop, DISCOVERY_INTERVAL);
 process.on('SIGINT', () => {
   console.log('[Agent] Shutting down...');
   streamManager.stopAll();
+  destroyFinder();
   wsClient.close();
   process.exit(0);
 });
@@ -73,6 +82,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   console.log('[Agent] Shutting down...');
   streamManager.stopAll();
+  destroyFinder();
   wsClient.close();
   process.exit(0);
 });

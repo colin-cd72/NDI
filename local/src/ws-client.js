@@ -13,6 +13,14 @@ class AgentWsClient {
   }
 
   connect() {
+    // Close any existing connection before reconnecting
+    if (this.ws) {
+      try { this.ws.removeAllListeners(); this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
+    this.connected = false;
+    this.stopHeartbeat();
+
     const wsUrl = `${this.url}?key=${this.streamKey}`;
     console.log(`[WS] Connecting to ${this.url}...`);
 
@@ -22,6 +30,8 @@ class AgentWsClient {
       console.log('[WS] Connected to server');
       this.connected = true;
       this.startHeartbeat();
+      // Notify that we connected so sources can be re-sent
+      if (this.onConnected) this.onConnected();
     });
 
     this.ws.on('message', (data) => {
