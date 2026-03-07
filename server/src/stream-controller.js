@@ -16,7 +16,17 @@ function getAgentWs() {
 
 function updateSources(sourceList) {
   // sourceList: [{ id, name }]
-  sources.clear();
+  // Diff instead of clear-all to avoid wiping active streams on transient discovery hiccups
+  const newIds = new Set(sourceList.map(s => s.id));
+
+  // Remove sources that are no longer reported (but keep active streams)
+  for (const id of sources.keys()) {
+    if (!newIds.has(id) && !activeStreams.has(id)) {
+      sources.delete(id);
+    }
+  }
+
+  // Add/update sources from the new list
   for (const s of sourceList) {
     sources.set(s.id, { name: s.name, status: activeStreams.has(s.id) ? 'streaming' : 'available' });
   }
@@ -95,6 +105,16 @@ function releaseStream(sourceId, userId) {
 }
 
 function stopStream(sourceId) {
+  cleanupStreamState(sourceId);
+
+  // Tell agent to stop
+  if (agentWs && agentWs.readyState === 1) {
+    agentWs.send(JSON.stringify({ type: 'stop-stream', sourceId }));
+  }
+}
+
+// Clean up server-side state without messaging the agent (used when agent reports stop)
+function cleanupStreamState(sourceId) {
   const stream = activeStreams.get(sourceId);
   if (!stream) return;
 
@@ -103,14 +123,8 @@ function stopStream(sourceId) {
   }
   activeStreams.delete(sourceId);
 
-  // Update source status
   if (sources.has(sourceId)) {
     sources.get(sourceId).status = 'available';
-  }
-
-  // Tell agent to stop
-  if (agentWs && agentWs.readyState === 1) {
-    agentWs.send(JSON.stringify({ type: 'stop-stream', sourceId }));
   }
 }
 
@@ -130,5 +144,6 @@ module.exports = {
   requestStream,
   releaseStream,
   stopStream,
+  cleanupStreamState,
   getActiveStreams
 };

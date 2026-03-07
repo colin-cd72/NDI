@@ -177,6 +177,11 @@
       activeSourceId = src.id;
       playerPlaceholder.hidden = true;
 
+      // Tell server what we're watching (for stale viewer cleanup)
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'watching', sourceId: src.id }));
+      }
+
       // Build the FLV URL for mpegts.js (HTTP-FLV over HTTPS)
       // streamPath is already "/live/KEY_sourceId", so just append .flv
       const flvUrl = `${httpProtocol}//${location.host}${data.streamPath}.flv`;
@@ -209,6 +214,11 @@
     playerPlaceholder.innerHTML = '<p>Select an NDI source to start viewing</p>';
     playerOverlay.hidden = true;
     renderSources();
+
+    // Tell server we stopped watching
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'watching', sourceId: null }));
+    }
   }
 
   // Logout
@@ -261,7 +271,7 @@
     if (ws) ws.close();
     if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
     if (activeSourceId) {
-      navigator.sendBeacon('/api/stream/stop', JSON.stringify({ sourceId: activeSourceId }));
+      navigator.sendBeacon('/api/stream/stop', new Blob([JSON.stringify({ sourceId: activeSourceId })], { type: 'application/json' }));
     }
   });
 

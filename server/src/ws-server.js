@@ -84,6 +84,8 @@ function handleAgentMessage(ws, msg) {
 
     case 'stream-stopped':
       console.log('[WS] Stream stopped for source:', msg.sourceId);
+      // Clean up server-side state without re-messaging the agent
+      streamController.cleanupStreamState(msg.sourceId);
       broadcastToViewers({
         type: 'stream-status',
         sourceId: msg.sourceId,
@@ -122,9 +124,23 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
     wss.handleUpgrade(request, socket, head, (ws) => {
       ws.userId = request.session.userId;
       ws.username = request.session.username;
+      ws.sessionID = request.sessionID || request.session.id;
+      ws.isAlive = true;
+      ws.activeSourceId = null; // track what this viewer is watching
       viewerClients.add(ws);
 
       console.log(`[WS] Viewer connected: ${ws.username}`);
+
+      ws.on('pong', () => { ws.isAlive = true; });
+
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data);
+          if (msg.type === 'watching') {
+            ws.activeSourceId = msg.sourceId || null;
+          }
+        } catch (e) {}
+      });
 
       // Send current sources immediately (filtered per user)
       const allSources = streamController.getSources();
@@ -135,6 +151,11 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
 
       ws.on('close', () => {
         viewerClients.delete(ws);
+        // Release any stream this viewer was watching
+        if (ws.activeSourceId) {
+          const viewerId = ws.sessionID || ws.userId;
+          streamController.releaseStream(ws.activeSourceId, viewerId);
+        }
         console.log(`[WS] Viewer disconnected: ${ws.username}`);
       });
     });

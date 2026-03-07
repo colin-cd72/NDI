@@ -6,15 +6,22 @@ const ndi = require('./ndi-native');
 const msvcrt = ndi.koffi.load('msvcrt.dll');
 const memcpy = msvcrt.func('void* memcpy(void* dest, const void* src, size_t count)');
 
-// Pre-allocate frame buffer (big enough for 4K BGRA: 3840*2160*4 = 33MB)
+// Max frame size for 4K BGRA: 3840*2160*4 = 33MB
 const MAX_FRAME_SIZE = 3840 * 2160 * 4;
-const frameBuf = Buffer.alloc(MAX_FRAME_SIZE);
 
-const activeStreams = new Map(); // sourceId -> { recv, ffmpeg, stopping }
+// Zombie detection: if no video frames for this long, consider the stream dead
+const ZOMBIE_TIMEOUT_MS = 10000;
 
-function startStream(source, streamKey) {
+const activeStreams = new Map(); // sourceId -> { recv, ffmpeg, stopping, ... }
+
+// Callback set by the agent to notify server of stream failures
+let onStreamError = null;
+function setOnStreamError(cb) { onStreamError = cb; }
+
+function startStream(source, streamKey, onReady) {
   if (activeStreams.has(source.id)) {
     console.log(`[Stream] Already streaming source: ${source.name}`);
+    if (onReady) onReady();
     return;
   }
 
@@ -38,11 +45,29 @@ function startStream(source, streamKey) {
 
   if (!recv) {
     console.error(`[Stream] Failed to create NDI receiver for "${source.name}"`);
+    if (onStreamError) onStreamError(source.id, 'Failed to create NDI receiver');
     return;
   }
 
-  const entry = { recv, ffmpeg: null, stopping: false, frameCount: 0 };
+  const entry = {
+    recv, ffmpeg: null, stopping: false, frameCount: 0,
+    frameBuf: Buffer.alloc(MAX_FRAME_SIZE), // per-stream buffer to avoid corruption
+    backpressure: false,
+    lastFrameTime: Date.now(),
+    zombieTimer: null,
+    onReady: onReady || null,
+    readyFired: false
+  };
   activeStreams.set(source.id, entry);
+
+  // Start zombie detection timer
+  entry.zombieTimer = setInterval(() => {
+    if (Date.now() - entry.lastFrameTime > ZOMBIE_TIMEOUT_MS && !entry.stopping) {
+      console.error(`[Stream] Zombie detected for "${source.name}" — no frames for ${ZOMBIE_TIMEOUT_MS / 1000}s`);
+      if (onStreamError) onStreamError(source.id, 'No video frames received (source may be offline)');
+      cleanupStream(source.id, entry);
+    }
+  }, ZOMBIE_TIMEOUT_MS);
 
   console.log(`[Stream] Waiting for first frame from "${source.name}"...`);
   recvLoop(source, entry, ffmpegPath, fullUrl);
@@ -65,6 +90,7 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
 
   if (frameType === ndi.FRAME_TYPE_VIDEO) {
     entry.frameCount++;
+    entry.lastFrameTime = Date.now();
 
     // Start FFmpeg on first video frame (now we know resolution and format)
     if (!entry.ffmpeg && videoFrame.xres > 0) {
@@ -112,26 +138,41 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
 
       entry.ffmpeg.on('error', (err) => {
         console.error(`[FFmpeg] Process error for ${source.name}:`, err.message);
+        if (onStreamError) onStreamError(source.id, `FFmpeg error: ${err.message}`);
         cleanupStream(source.id, entry);
       });
 
       entry.ffmpeg.on('exit', (code) => {
         console.log(`[FFmpeg] Process exited for ${source.name} with code ${code}`);
+        if (code !== 0 && !entry.stopping) {
+          if (onStreamError) onStreamError(source.id, `FFmpeg exited with code ${code}`);
+        }
         cleanupStream(source.id, entry);
       });
 
       entry.ffmpeg.stdin.on('error', () => {
         // FFmpeg stdin closed — will be cleaned up by exit handler
       });
+
+      // Notify that stream is actually running
+      if (entry.onReady && !entry.readyFired) {
+        entry.readyFired = true;
+        entry.onReady();
+      }
     }
 
-    // Copy raw frame data to buffer and write to FFmpeg stdin
-    if (entry.ffmpeg && entry.ffmpeg.stdin.writable && videoFrame.p_data) {
+    // Copy raw frame data to per-stream buffer and write to FFmpeg stdin
+    if (entry.ffmpeg && entry.ffmpeg.stdin.writable && videoFrame.p_data && !entry.backpressure) {
       const frameSize = videoFrame.line_stride_in_bytes * videoFrame.yres;
       if (frameSize > 0 && frameSize <= MAX_FRAME_SIZE) {
         try {
-          memcpy(frameBuf, videoFrame.p_data, frameSize);
-          entry.ffmpeg.stdin.write(frameBuf.subarray(0, frameSize));
+          memcpy(entry.frameBuf, videoFrame.p_data, frameSize);
+          const canContinue = entry.ffmpeg.stdin.write(entry.frameBuf.subarray(0, frameSize));
+          if (!canContinue) {
+            // Backpressure: stop writing until FFmpeg drains
+            entry.backpressure = true;
+            entry.ffmpeg.stdin.once('drain', () => { entry.backpressure = false; });
+          }
         } catch (err) {
           if (entry.frameCount < 5) {
             console.error(`[Stream] Frame write error:`, err.message);
@@ -144,6 +185,7 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
     ndi.NDIlib_recv_free_video_v2(entry.recv, videoFrame);
   } else if (frameType === ndi.FRAME_TYPE_ERROR) {
     console.error(`[Stream] NDI recv error for "${source.name}"`);
+    if (onStreamError) onStreamError(source.id, 'NDI receiver error');
     cleanupStream(source.id, entry);
     return;
   }
@@ -159,6 +201,11 @@ function cleanupStream(sourceId, entry) {
   if (!entry || entry.stopping) return;
   entry.stopping = true;
   activeStreams.delete(sourceId);
+
+  if (entry.zombieTimer) {
+    clearInterval(entry.zombieTimer);
+    entry.zombieTimer = null;
+  }
 
   if (entry.ffmpeg) {
     try { entry.ffmpeg.stdin.end(); } catch (e) {}
@@ -192,4 +239,4 @@ function isStreaming(sourceId) {
   return activeStreams.has(sourceId);
 }
 
-module.exports = { startStream, stopStream, stopAll, isStreaming };
+module.exports = { startStream, stopStream, stopAll, isStreaming, setOnStreamError };

@@ -10,6 +10,7 @@ class AgentWsClient {
     this.onStartStream = null;  // callback(sourceId, streamKey)
     this.onStopStream = null;   // callback(sourceId)
     this.connected = false;
+    this.reconnectDelay = 5000; // starts at 5s, grows exponentially
   }
 
   connect() {
@@ -29,6 +30,7 @@ class AgentWsClient {
     this.ws.on('open', () => {
       console.log('[WS] Connected to server');
       this.connected = true;
+      this.reconnectDelay = 5000; // reset backoff on successful connect
       this.startHeartbeat();
       // Notify that we connected so sources can be re-sent
       if (this.onConnected) this.onConnected();
@@ -120,11 +122,14 @@ class AgentWsClient {
 
   scheduleReconnect() {
     if (this.reconnectTimer) return;
-    console.log('[WS] Reconnecting in 5 seconds...');
+    const delay = this.reconnectDelay;
+    console.log(`[WS] Reconnecting in ${(delay / 1000).toFixed(0)}s...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 5000);
+    }, delay);
+    // Exponential backoff: 5s → 10s → 20s → 40s → 60s max
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 60000);
   }
 
   close() {

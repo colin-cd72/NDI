@@ -13,6 +13,13 @@ let knownSources = [];
 // Create WebSocket client
 const wsClient = new AgentWsClient(SERVER_WS_URL, STREAM_KEY);
 
+// Notify server when a stream fails unexpectedly (FFmpeg crash, zombie, etc.)
+streamManager.setOnStreamError((sourceId, error) => {
+  console.error(`[Agent] Stream error for ${sourceId}: ${error}`);
+  wsClient.sendStreamError(sourceId, error);
+  wsClient.sendStreamStopped(sourceId);
+});
+
 // Handle stream start requests from server
 wsClient.onStartStream = (sourceId, streamKey) => {
   const source = knownSources.find(s => s.id === sourceId);
@@ -22,8 +29,11 @@ wsClient.onStartStream = (sourceId, streamKey) => {
     return;
   }
 
-  streamManager.startStream(source, streamKey);
-  wsClient.sendStreamStarted(sourceId);
+  // Don't send stream-started yet — wait for the first frame / FFmpeg launch
+  // The stream-started confirmation is sent after startStream succeeds
+  streamManager.startStream(source, streamKey, () => {
+    wsClient.sendStreamStarted(sourceId);
+  });
 };
 
 // Handle stream stop requests from server
