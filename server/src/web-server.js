@@ -11,6 +11,11 @@ const userStore = require('./auth/user-store');
 const bandwidthMonitor = require('./bandwidth-monitor');
 const { broadcastToViewers } = require('./ws-server');
 
+// Broadcast updated sources whenever stream state changes (e.g. grace timer expiry)
+streamController.setOnStateChange(() => {
+  broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
+});
+
 function createApp() {
   const app = express();
 

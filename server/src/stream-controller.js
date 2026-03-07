@@ -5,6 +5,8 @@ const activeStreams = new Map();  // sourceId -> { viewers: Set<viewerId>, strea
 const GRACE_PERIOD_MS = 30000;   // 30s before stopping an unwatched stream
 
 let agentWs = null;              // Reference to the agent WebSocket (set by ws-server)
+let onStateChange = null;        // Called when sources/streams change (set by web-server)
+function setOnStateChange(cb) { onStateChange = cb; }
 
 function setAgentWs(ws) {
   agentWs = ws;
@@ -100,6 +102,7 @@ function releaseStream(sourceId, userId) {
     // Grace period before stopping
     stream.graceTimer = setTimeout(() => {
       stopStream(sourceId);
+      if (onStateChange) onStateChange();
     }, GRACE_PERIOD_MS);
   }
 }
@@ -139,6 +142,7 @@ function getActiveStreams() {
 module.exports = {
   setAgentWs,
   getAgentWs,
+  setOnStateChange,
   updateSources,
   getSources,
   requestStream,

@@ -156,10 +156,8 @@
     // Bail if another click superseded this one
     if (thisGen !== switchGeneration) return;
 
-    // Optimistically mark as active immediately
+    // Optimistically mark as active immediately (don't touch viewer count — server broadcast handles it)
     activeSourceId = src.id;
-    const srcObj = sources.find(s => s.id === src.id);
-    if (srcObj) { srcObj.status = 'streaming'; srcObj.viewers = (srcObj.viewers || 0) + 1; }
     renderSources();
 
     // Start new stream
@@ -178,7 +176,6 @@
       if (!res.ok) {
         console.error('Start stream error:', data.error);
         activeSourceId = null;
-        if (srcObj) { srcObj.status = 'available'; srcObj.viewers = Math.max(0, (srcObj.viewers || 1) - 1); }
         renderSources();
         return;
       }
