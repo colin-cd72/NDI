@@ -10,7 +10,7 @@ const memcpy = msvcrt.func('void* memcpy(void* dest, const void* src, size_t cou
 const MAX_FRAME_SIZE = 3840 * 2160 * 4;
 
 // Zombie detection: if no video frames for this long, consider the stream dead
-const ZOMBIE_TIMEOUT_MS = 10000;
+const ZOMBIE_TIMEOUT_MS = parseInt(process.env.ZOMBIE_TIMEOUT_MS) || 30000;
 
 // Encoder preference: try GPU first, fall back to CPU
 const ENCODER = process.env.ENCODER || 'auto'; // 'auto', 'amf', 'cpu'
