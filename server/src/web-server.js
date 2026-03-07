@@ -9,6 +9,7 @@ const { requireAuth, requireAdmin } = require('./auth/auth-middleware');
 const streamController = require('./stream-controller');
 const userStore = require('./auth/user-store');
 const bandwidthMonitor = require('./bandwidth-monitor');
+const { broadcastToViewers } = require('./ws-server');
 
 function createApp() {
   const app = express();
@@ -93,6 +94,8 @@ function createApp() {
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
     }
+    // Immediately broadcast updated viewer counts to all viewers
+    broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
     res.json({ streamPath: result.streamPath });
   });
 
@@ -104,6 +107,8 @@ function createApp() {
     const viewerId = req.sessionID || req.session.userId;
     console.log(`[API] stream/stop: user=${req.session.username} sourceId=${sourceId} viewerId=${viewerId}`);
     streamController.releaseStream(sourceId, viewerId);
+    // Immediately broadcast updated viewer counts
+    broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
     res.json({ ok: true });
   });
 

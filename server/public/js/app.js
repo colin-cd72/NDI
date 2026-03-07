@@ -156,6 +156,12 @@
     // Bail if another click superseded this one
     if (thisGen !== switchGeneration) return;
 
+    // Optimistically mark as active immediately
+    activeSourceId = src.id;
+    const srcObj = sources.find(s => s.id === src.id);
+    if (srcObj) { srcObj.status = 'streaming'; srcObj.viewers = (srcObj.viewers || 0) + 1; }
+    renderSources();
+
     // Start new stream
     try {
       const res = await fetch('/api/stream/start', {
@@ -171,10 +177,12 @@
 
       if (!res.ok) {
         console.error('Start stream error:', data.error);
+        activeSourceId = null;
+        if (srcObj) { srcObj.status = 'available'; srcObj.viewers = Math.max(0, (srcObj.viewers || 1) - 1); }
+        renderSources();
         return;
       }
 
-      activeSourceId = src.id;
       playerPlaceholder.hidden = true;
 
       // Tell server what we're watching (for stale viewer cleanup)
