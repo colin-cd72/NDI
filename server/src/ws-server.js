@@ -95,10 +95,16 @@ function handleAgentMessage(ws, msg) {
 
     case 'stream-error':
       console.error('[WS] Stream error for source:', msg.sourceId, msg.error);
+      // Clean up stale activeStreams entry so retries actually re-send start-stream
+      streamController.cleanupStreamState(msg.sourceId);
       broadcastToViewers({
         type: 'stream-error',
         sourceId: msg.sourceId,
         error: msg.error
+      });
+      broadcastToViewers({
+        type: 'sources',
+        sources: streamController.getSources()
       });
       break;
 
