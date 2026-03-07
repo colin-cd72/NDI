@@ -53,7 +53,7 @@ function handleAgentUpgrade(wss, request, socket, head) {
     });
 
     ws.on('close', () => {
-      console.log('[WS] Agent disconnected');
+      console.log('[WS] Agent disconnected — all sources will be cleared');
       // Only clear if this is still the active agent (not a stale connection)
       if (streamController.getAgentWs() === ws) {
         streamController.setAgentWs(null);
@@ -135,7 +135,7 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
       ws.activeSourceId = null; // track what this viewer is watching
       viewerClients.add(ws);
 
-      console.log(`[WS] Viewer connected: ${ws.username}`);
+      console.log(`[WS] Viewer connected: ${ws.username} (${viewerClients.size} viewers online)`);
 
       ws.on('pong', () => { ws.isAlive = true; });
 
@@ -143,7 +143,13 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
         try {
           const msg = JSON.parse(data);
           if (msg.type === 'watching') {
+            const prev = ws.activeSourceId;
             ws.activeSourceId = msg.sourceId || null;
+            if (msg.sourceId) {
+              console.log(`[WS] ${ws.username} now watching: ${msg.sourceId}`);
+            } else if (prev) {
+              console.log(`[WS] ${ws.username} stopped watching: ${prev}`);
+            }
           }
         } catch (e) {}
       });
@@ -160,9 +166,10 @@ function handleViewerUpgrade(wss, request, socket, head, sessionMiddleware) {
         // Release any stream this viewer was watching
         if (ws.activeSourceId) {
           const viewerId = ws.sessionID || ws.userId;
+          console.log(`[WS] ${ws.username} disconnected while watching ${ws.activeSourceId} — releasing`);
           streamController.releaseStream(ws.activeSourceId, viewerId);
         }
-        console.log(`[WS] Viewer disconnected: ${ws.username}`);
+        console.log(`[WS] Viewer disconnected: ${ws.username} (${viewerClients.size} viewers online)`);
       });
     });
   });

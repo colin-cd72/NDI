@@ -130,7 +130,7 @@ function createApp() {
 
   // Admin: force stop ALL streams
   app.post('/api/admin/streams/stop-all', requireAdmin, (req, res) => {
-    console.log('[Admin] Force stopping all streams');
+    console.log(`[Admin] ${req.session.username} force stopping ALL streams`);
     streamController.forceStopAllStreams();
     broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
     res.json({ ok: true });
@@ -140,7 +140,7 @@ function createApp() {
   app.post('/api/admin/stream/stop', requireAdmin, (req, res) => {
     const { sourceId } = req.body;
     if (!sourceId) return res.status(400).json({ error: 'sourceId required' });
-    console.log(`[Admin] Force stopping stream: ${sourceId}`);
+    console.log(`[Admin] ${req.session.username} force stopping stream: ${sourceId}`);
     streamController.forceStopStream(sourceId);
     broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
     broadcastToViewers({ type: 'stream-status', sourceId, status: 'available' });
@@ -151,7 +151,7 @@ function createApp() {
   app.post('/api/admin/stream/kick', requireAdmin, (req, res) => {
     const { sourceId, viewerId } = req.body;
     if (!sourceId || !viewerId) return res.status(400).json({ error: 'sourceId and viewerId required' });
-    console.log(`[Admin] Kicking viewer ${viewerId} from stream ${sourceId}`);
+    console.log(`[Admin] ${req.session.username} kicking viewer ${viewerId} from stream ${sourceId}`);
     streamController.forceKickViewer(sourceId, viewerId);
     broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
     res.json({ ok: true });

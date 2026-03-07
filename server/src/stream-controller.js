@@ -21,17 +21,27 @@ function updateSources(sourceList) {
   // sourceList: [{ id, name }]
   // Diff instead of clear-all to avoid wiping active streams on transient discovery hiccups
   const newIds = new Set(sourceList.map(s => s.id));
+  const prevCount = sources.size;
 
   // Remove sources that are no longer reported (but keep active streams)
   for (const id of sources.keys()) {
     if (!newIds.has(id) && !activeStreams.has(id)) {
+      const name = sources.get(id).name;
+      console.log(`[Sources] Removed: ${name} (${id})`);
       sources.delete(id);
     }
   }
 
   // Add/update sources from the new list
   for (const s of sourceList) {
+    if (!sources.has(s.id)) {
+      console.log(`[Sources] Discovered: ${s.name} (${s.id})`);
+    }
     sources.set(s.id, { name: s.name, status: activeStreams.has(s.id) ? 'streaming' : 'available' });
+  }
+
+  if (sources.size !== prevCount) {
+    console.log(`[Sources] Total: ${sources.size} sources available`);
   }
 }
 
@@ -50,7 +60,11 @@ function getSources() {
 }
 
 function requestStream(sourceId, userId) {
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  const username = viewerNames.get(userId) || userId;
+
   if (!sources.has(sourceId)) {
+    console.log(`[Stream] Request DENIED — source not found: ${sourceId} (user: ${username})`);
     return { ok: false, error: 'Source not found' };
   }
 
@@ -64,7 +78,9 @@ function requestStream(sourceId, userId) {
     if (stream.graceTimer) {
       clearTimeout(stream.graceTimer);
       stream.graceTimer = null;
+      console.log(`[Stream] Grace period cancelled for "${sourceName}" — ${username} joined`);
     }
+    console.log(`[Stream] "${sourceName}" — ${username} joined (${stream.viewers.size} viewers)`);
     return { ok: true, streamPath };
   }
 
@@ -81,13 +97,14 @@ function requestStream(sourceId, userId) {
   }
 
   if (agentWs && agentWs.readyState === 1) {
+    console.log(`[Stream] Starting "${sourceName}" — requested by ${username}`);
     agentWs.send(JSON.stringify({
       type: 'start-stream',
       sourceId,
       streamKey: `${streamKey}_${sourceId}`
     }));
   } else {
-    console.warn('[StreamController] No agent connected, cannot start stream');
+    console.warn(`[Stream] Cannot start "${sourceName}" — no agent connected`);
   }
 
   return { ok: true, streamPath };
@@ -97,11 +114,16 @@ function releaseStream(sourceId, userId) {
   const stream = activeStreams.get(sourceId);
   if (!stream) return;
 
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  const username = viewerNames.get(userId) || userId;
   stream.viewers.delete(userId);
+  console.log(`[Stream] "${sourceName}" — ${username} left (${stream.viewers.size} viewers remaining)`);
 
   if (stream.viewers.size === 0) {
+    console.log(`[Stream] "${sourceName}" — no viewers, starting ${GRACE_PERIOD_MS / 1000}s grace period`);
     // Grace period before stopping
     stream.graceTimer = setTimeout(() => {
+      console.log(`[Stream] "${sourceName}" — grace period expired, stopping stream`);
       stopStream(sourceId);
       if (onStateChange) onStateChange();
     }, GRACE_PERIOD_MS);
@@ -109,6 +131,8 @@ function releaseStream(sourceId, userId) {
 }
 
 function stopStream(sourceId) {
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  console.log(`[Stream] Stopping "${sourceName}" — telling agent`);
   cleanupStreamState(sourceId);
 
   // Tell agent to stop
@@ -122,6 +146,9 @@ function cleanupStreamState(sourceId) {
   const stream = activeStreams.get(sourceId);
   if (!stream) return;
 
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  console.log(`[Stream] Cleanup "${sourceName}" — had ${stream.viewers.size} viewer(s)`);
+
   if (stream.graceTimer) {
     clearTimeout(stream.graceTimer);
   }
@@ -130,13 +157,20 @@ function cleanupStreamState(sourceId) {
   if (sources.has(sourceId)) {
     sources.get(sourceId).status = 'available';
   }
+
+  console.log(`[Stream] Active streams: ${activeStreams.size}`);
 }
 
 function registerViewer(viewerId, username) {
+  if (!viewerNames.has(viewerId)) {
+    console.log(`[Viewer] Registered: ${username} (${viewerId})`);
+  }
   viewerNames.set(viewerId, username);
 }
 
 function unregisterViewer(viewerId) {
+  const username = viewerNames.get(viewerId) || viewerId;
+  console.log(`[Viewer] Unregistered: ${username}`);
   viewerNames.delete(viewerId);
 }
 
@@ -169,11 +203,14 @@ function getDetailedStreams() {
 }
 
 function forceStopStream(sourceId) {
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  console.log(`[Admin] Force stop: "${sourceName}"`);
   stopStream(sourceId);
   if (onStateChange) onStateChange();
 }
 
 function forceStopAllStreams() {
+  console.log(`[Admin] Force stop ALL — ${activeStreams.size} active stream(s)`);
   for (const sourceId of [...activeStreams.keys()]) {
     stopStream(sourceId);
   }
@@ -181,6 +218,9 @@ function forceStopAllStreams() {
 }
 
 function forceKickViewer(sourceId, viewerId) {
+  const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+  const username = viewerNames.get(viewerId) || viewerId;
+  console.log(`[Admin] Kick: ${username} from "${sourceName}"`);
   releaseStream(sourceId, viewerId);
   if (onStateChange) onStateChange();
 }
