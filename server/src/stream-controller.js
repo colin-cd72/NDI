@@ -2,6 +2,7 @@
 
 const sources = new Map();       // sourceId -> { name, status }
 const activeStreams = new Map();  // sourceId -> { viewers: Set<viewerId>, streamPath, graceTimer }
+const viewerNames = new Map();   // viewerId -> username
 const GRACE_PERIOD_MS = 30000;   // 30s before stopping an unwatched stream
 
 let agentWs = null;              // Reference to the agent WebSocket (set by ws-server)
@@ -131,6 +132,14 @@ function cleanupStreamState(sourceId) {
   }
 }
 
+function registerViewer(viewerId, username) {
+  viewerNames.set(viewerId, username);
+}
+
+function unregisterViewer(viewerId) {
+  viewerNames.delete(viewerId);
+}
+
 function getActiveStreams() {
   const result = {};
   for (const [id, stream] of activeStreams) {
@@ -139,15 +148,50 @@ function getActiveStreams() {
   return result;
 }
 
+function getDetailedStreams() {
+  const result = [];
+  for (const [sourceId, stream] of activeStreams) {
+    const source = sources.get(sourceId);
+    const viewers = [];
+    for (const viewerId of stream.viewers) {
+      viewers.push({
+        viewerId,
+        username: viewerNames.get(viewerId) || 'unknown'
+      });
+    }
+    result.push({
+      sourceId,
+      name: source ? source.name : sourceId,
+      viewers
+    });
+  }
+  return result;
+}
+
+function forceStopStream(sourceId) {
+  stopStream(sourceId);
+  if (onStateChange) onStateChange();
+}
+
+function forceKickViewer(sourceId, viewerId) {
+  releaseStream(sourceId, viewerId);
+  if (onStateChange) onStateChange();
+}
+
 module.exports = {
   setAgentWs,
   getAgentWs,
   setOnStateChange,
+  registerViewer,
+  unregisterViewer,
   updateSources,
   getSources,
   requestStream,
   releaseStream,
   stopStream,
   cleanupStreamState,
-  getActiveStreams
+  getActiveStreams,
+  getDetailedStreams,
+  forceStopStream,
+  forceKickViewer
 };

@@ -104,18 +104,23 @@
 
   async function poll() {
     try {
-      const res = await fetch('/api/admin/bandwidth');
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
+      const [bwRes, streamsRes] = await Promise.all([
+        fetch('/api/admin/bandwidth'),
+        fetch('/api/admin/streams')
+      ]);
+      if (!bwRes.ok) {
+        if (bwRes.status === 401 || bwRes.status === 403) {
           window.location.href = '/';
           return;
         }
         return;
       }
-      const data = await res.json();
-      updateCards(data);
-      updateChart(data);
-      updateStreamTable(data);
+      const bwData = await bwRes.json();
+      const streamsData = streamsRes.ok ? await streamsRes.json() : { streams: [] };
+      updateCards(bwData);
+      updateChart(bwData);
+      updateStreamTable(bwData);
+      updateViewerTable(streamsData.streams);
     } catch (err) {
       console.error('Bandwidth poll error:', err);
     }
@@ -155,7 +160,7 @@
   function updateStreamTable(data) {
     const tbody = document.getElementById('streamTableBody');
     if (data.streams.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="bw-table-empty">No active streams</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="bw-table-empty">No active streams</td></tr>';
       return;
     }
     tbody.innerHTML = '';
@@ -166,7 +171,53 @@
         <td>${s.viewers}</td>
         <td>${formatBandwidth(s.inboundBps)}</td>
         <td>${formatBandwidth(s.outboundBps)}</td>
+        <td><button class="btn btn-small btn-danger" data-kill-stream="${escapeHtml(s.sourceId)}">Kill Stream</button></td>
       `;
+      tr.querySelector('[data-kill-stream]').addEventListener('click', async (e) => {
+        const sourceId = e.target.dataset.killStream;
+        if (!confirm(`Stop stream "${s.name}" for all viewers?`)) return;
+        await fetch('/api/admin/stream/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceId })
+        });
+        poll();
+      });
+      tbody.appendChild(tr);
+    }
+  }
+
+  function updateViewerTable(streams) {
+    const tbody = document.getElementById('viewerTableBody');
+    const rows = [];
+    for (const s of streams) {
+      for (const v of s.viewers) {
+        rows.push({ username: v.username, viewerId: v.viewerId, sourceId: s.sourceId, sourceName: s.name });
+      }
+    }
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" class="bw-table-empty">No active viewers</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(r.username)}</td>
+        <td>${escapeHtml(r.sourceName)}</td>
+        <td><button class="btn btn-small btn-danger" data-kick-source="${escapeHtml(r.sourceId)}" data-kick-viewer="${escapeHtml(r.viewerId)}">Kick</button></td>
+      `;
+      tr.querySelector('[data-kick-viewer]').addEventListener('click', async (e) => {
+        const sourceId = e.target.dataset.kickSource;
+        const viewerId = e.target.dataset.kickViewer;
+        if (!confirm(`Kick ${r.username} from "${r.sourceName}"?`)) return;
+        await fetch('/api/admin/stream/kick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceId, viewerId })
+        });
+        poll();
+      });
       tbody.appendChild(tr);
     }
   }
