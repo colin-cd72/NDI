@@ -12,11 +12,62 @@ const MAX_FRAME_SIZE = 3840 * 2160 * 4;
 // Zombie detection: if no video frames for this long, consider the stream dead
 const ZOMBIE_TIMEOUT_MS = 10000;
 
+// Encoder preference: try GPU first, fall back to CPU
+const ENCODER = process.env.ENCODER || 'auto'; // 'auto', 'amf', 'cpu'
+let gpuAvailable = null; // null = untested, true/false after first attempt
+
 const activeStreams = new Map(); // sourceId -> { recv, ffmpeg, stopping, ... }
 
 // Callback set by the agent to notify server of stream failures
 let onStreamError = null;
 function setOnStreamError(cb) { onStreamError = cb; }
+
+function buildEncoderArgs(pixFmt, width, height, fps, rtmpUrl, useGpu) {
+  const inputArgs = [
+    '-f', 'rawvideo',
+    '-pix_fmt', pixFmt,
+    '-s', `${width}x${height}`,
+    '-r', String(fps),
+    '-i', 'pipe:0',
+  ];
+
+  const outputArgs = [
+    '-g', String(fps),
+    '-keyint_min', String(fps),
+    '-sc_threshold', '0',
+    '-pix_fmt', 'yuv420p',
+    '-an',
+    '-f', 'flv',
+    '-flvflags', 'no_duration_filesize',
+    rtmpUrl
+  ];
+
+  if (useGpu) {
+    return [
+      ...inputArgs,
+      '-c:v', 'h264_amf',
+      '-usage', 'ultralowlatency',
+      '-quality', 'speed',
+      '-rc', 'cbr',
+      '-b:v', '4000k',
+      '-maxrate', '4500k',
+      '-bufsize', '8000k',
+      ...outputArgs
+    ];
+  }
+
+  // CPU fallback
+  return [
+    ...inputArgs,
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-tune', 'zerolatency',
+    '-b:v', '4000k',
+    '-maxrate', '4500k',
+    '-bufsize', '8000k',
+    ...outputArgs
+  ];
+}
 
 function startStream(source, streamKey, onReady) {
   if (activeStreams.has(source.id)) {
@@ -99,36 +150,21 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
         ? (videoFrame.frame_rate_N / videoFrame.frame_rate_D)
         : 30;
 
-      console.log(`[Stream] "${source.name}": ${videoFrame.xres}x${videoFrame.yres} @ ${fps.toFixed(2)}fps, format=${pixFmt}, stride=${videoFrame.line_stride_in_bytes}`);
-      console.log(`[Stream] Starting FFmpeg → ${rtmpUrl}`);
-
       const fpsRound = Math.round(fps);
-      const args = [
-        '-f', 'rawvideo',
-        '-pix_fmt', pixFmt,
-        '-s', `${videoFrame.xres}x${videoFrame.yres}`,
-        '-r', String(fpsRound),
-        '-i', 'pipe:0',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-tune', 'zerolatency',
-        '-b:v', '4000k',
-        '-maxrate', '4500k',
-        '-bufsize', '8000k',
-        '-g', String(fpsRound),
-        '-keyint_min', String(fpsRound),
-        '-sc_threshold', '0',
-        '-pix_fmt', 'yuv420p',
-        '-an',
-        '-f', 'flv',
-        '-flvflags', 'no_duration_filesize',
-        rtmpUrl
-      ];
+      const useGpu = ENCODER === 'amf' || (ENCODER === 'auto' && gpuAvailable !== false);
+      const encoderName = useGpu ? 'h264_amf (GPU)' : 'libx264 (CPU)';
+
+      console.log(`[Stream] "${source.name}": ${videoFrame.xres}x${videoFrame.yres} @ ${fps.toFixed(2)}fps, format=${pixFmt}, stride=${videoFrame.line_stride_in_bytes}`);
+      console.log(`[Stream] Starting FFmpeg [${encoderName}] → ${rtmpUrl}`);
+
+      const args = buildEncoderArgs(pixFmt, videoFrame.xres, videoFrame.yres, fpsRound, rtmpUrl, useGpu);
 
       entry.ffmpeg = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
+      let stderrBuf = '';
       entry.ffmpeg.stderr.on('data', (data) => {
         const line = data.toString().trim();
+        stderrBuf += line + '\n';
         if (line.includes('frame=') || line.includes('speed=')) {
           if (entry.frameCount % 300 === 0) console.log(`[FFmpeg] ${source.name}: ${line}`);
         } else if (line) {
@@ -144,6 +180,16 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
 
       entry.ffmpeg.on('exit', (code) => {
         console.log(`[FFmpeg] Process exited for ${source.name} with code ${code}`);
+        // If GPU encoder failed early, mark it unavailable and let the stream restart with CPU
+        if (code !== 0 && !entry.stopping && useGpu && gpuAvailable === null && entry.frameCount < 30) {
+          const isAmfError = stderrBuf.includes('amf') || stderrBuf.includes('AMF') || stderrBuf.includes('h264_amf');
+          if (isAmfError || entry.frameCount < 5) {
+            console.warn('[FFmpeg] GPU encoder (h264_amf) failed, falling back to CPU');
+            gpuAvailable = false;
+          }
+        } else if (code === 0 && useGpu) {
+          gpuAvailable = true;
+        }
         if (code !== 0 && !entry.stopping) {
           if (onStreamError) onStreamError(source.id, `FFmpeg exited with code ${code}`);
         }
@@ -157,6 +203,7 @@ function recvLoop(source, entry, ffmpegPath, rtmpUrl) {
       // Notify that stream is actually running
       if (entry.onReady && !entry.readyFired) {
         entry.readyFired = true;
+        if (useGpu && gpuAvailable === null) gpuAvailable = true;
         entry.onReady();
       }
     }
