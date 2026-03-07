@@ -1,62 +1,27 @@
-// Bandwidth monitor: reads /proc/net/dev on Linux, computes rx/tx bytes/sec.
-// On non-Linux systems, returns zeros gracefully.
+// Bandwidth monitor: tracks NDI app-level traffic based on active streams and viewers.
+// Inbound = RTMP streams from agent, Outbound = HTTP-FLV to viewers.
 
-const fs = require('fs');
 const streamController = require('./stream-controller');
 
 const INTERVAL_MS = 2000;
 const MAX_HISTORY = 150; // 150 samples × 2s = 5 minutes
-const ESTIMATED_STREAM_BPS = 4 * 1000 * 1000; // 4 Mbps per viewer
+const STREAM_BITRATE_BPS = parseInt(process.env.STREAM_BITRATE) || 4 * 1000 * 1000; // 4 Mbps
 
-let iface = process.env.NET_INTERFACE || 'eth0';
 let timer = null;
-let prevRx = null;
-let prevTx = null;
-let prevTime = null;
-let currentRxBps = 0;
-let currentTxBps = 0;
-const history = []; // { ts, rxBps, txBps }
-
-function parseNetDev() {
-  try {
-    const data = fs.readFileSync('/proc/net/dev', 'utf8');
-    const lines = data.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith(iface + ':')) continue;
-      // Format: iface: rx_bytes rx_packets ... tx_bytes tx_packets ...
-      const parts = trimmed.split(/[:\s]+/);
-      // parts[0] = iface, parts[1] = rx_bytes, ... parts[9] = tx_bytes
-      return {
-        rxBytes: parseInt(parts[1], 10),
-        txBytes: parseInt(parts[9], 10)
-      };
-    }
-  } catch (e) {
-    // Not Linux or file not accessible
-  }
-  return null;
-}
+const history = []; // { ts, inboundBps, outboundBps }
 
 function sample() {
-  const now = Date.now();
-  const netData = parseNetDev();
+  const activeStreams = streamController.getActiveStreams();
 
-  if (netData && prevRx !== null && prevTime !== null) {
-    const elapsed = (now - prevTime) / 1000; // seconds
-    if (elapsed > 0) {
-      currentRxBps = Math.max(0, (netData.rxBytes - prevRx) / elapsed) * 8; // bits/sec
-      currentTxBps = Math.max(0, (netData.txBytes - prevTx) / elapsed) * 8;
-    }
+  let inboundBps = 0;
+  let outboundBps = 0;
+
+  for (const [, stream] of Object.entries(activeStreams)) {
+    inboundBps += STREAM_BITRATE_BPS;  // one RTMP ingest per stream
+    outboundBps += stream.viewers * STREAM_BITRATE_BPS;  // one FLV output per viewer
   }
 
-  if (netData) {
-    prevRx = netData.rxBytes;
-    prevTx = netData.txBytes;
-    prevTime = now;
-  }
-
-  history.push({ ts: now, rxBps: currentRxBps, txBps: currentTxBps });
+  history.push({ ts: Date.now(), inboundBps, outboundBps });
   if (history.length > MAX_HISTORY) {
     history.shift();
   }
@@ -66,49 +31,50 @@ function getSnapshot() {
   const activeStreams = streamController.getActiveStreams();
   const sources = streamController.getSources();
 
-  // Build per-stream info
   const streams = [];
   let totalViewers = 0;
-  let totalStreamOutbound = 0;
+  let totalInbound = 0;
+  let totalOutbound = 0;
 
   for (const [sourceId, stream] of Object.entries(activeStreams)) {
     const source = sources.find(s => s.id === sourceId);
-    const viewers = stream.viewers;
-    const outboundBps = viewers * ESTIMATED_STREAM_BPS;
-    totalViewers += viewers;
-    totalStreamOutbound += outboundBps;
+    const outboundBps = stream.viewers * STREAM_BITRATE_BPS;
+    totalViewers += stream.viewers;
+    totalInbound += STREAM_BITRATE_BPS;
+    totalOutbound += outboundBps;
 
     streams.push({
       sourceId,
       name: source ? source.name : sourceId,
-      viewers,
-      inboundBps: ESTIMATED_STREAM_BPS, // one inbound stream from agent
+      viewers: stream.viewers,
+      inboundBps: STREAM_BITRATE_BPS,
       outboundBps
     });
   }
 
+  const latest = history.length > 0 ? history[history.length - 1] : { inboundBps: 0, outboundBps: 0 };
+
   return {
     server: {
-      rxBps: currentRxBps,
-      txBps: currentTxBps,
-      interface: iface
+      rxBps: latest.inboundBps,
+      txBps: latest.outboundBps
     },
     streams,
     totals: {
       activeStreams: streams.length,
       totalViewers,
-      estimatedOutboundBps: totalStreamOutbound
+      inboundBps: totalInbound,
+      outboundBps: totalOutbound
     },
-    history: history.map(h => ({ ts: h.ts, rxBps: h.rxBps, txBps: h.txBps }))
+    history: history.map(h => ({ ts: h.ts, rxBps: h.inboundBps, txBps: h.outboundBps }))
   };
 }
 
 function start() {
   if (timer) return;
-  // Take an initial sample immediately
   sample();
   timer = setInterval(sample, INTERVAL_MS);
-  console.log(`[BandwidthMonitor] Started monitoring interface: ${iface}`);
+  console.log(`[BandwidthMonitor] Tracking NDI app traffic (${STREAM_BITRATE_BPS / 1000000} Mbps per stream)`);
 }
 
 function stop() {
