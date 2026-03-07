@@ -128,6 +128,14 @@ function createApp() {
     res.json({ streams: streamController.getDetailedStreams() });
   });
 
+  // Admin: force stop ALL streams
+  app.post('/api/admin/streams/stop-all', requireAdmin, (req, res) => {
+    console.log('[Admin] Force stopping all streams');
+    streamController.forceStopAllStreams();
+    broadcastToViewers({ type: 'sources', sources: streamController.getSources() });
+    res.json({ ok: true });
+  });
+
   // Admin: force stop an entire stream
   app.post('/api/admin/stream/stop', requireAdmin, (req, res) => {
     const { sourceId } = req.body;

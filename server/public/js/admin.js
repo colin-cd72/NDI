@@ -157,8 +157,17 @@
     chart.update('none');
   }
 
+  // Kill All Streams button
+  const killAllBtn = document.getElementById('killAllBtn');
+  killAllBtn.addEventListener('click', async () => {
+    if (!confirm('Stop ALL active streams for all viewers?')) return;
+    await fetch('/api/admin/streams/stop-all', { method: 'POST' });
+    poll();
+  });
+
   function updateStreamTable(data) {
     const tbody = document.getElementById('streamTableBody');
+    killAllBtn.style.display = data.streams.length > 0 ? '' : 'none';
     if (data.streams.length === 0) {
       tbody.innerHTML = '<tr><td colspan="5" class="bw-table-empty">No active streams</td></tr>';
       return;

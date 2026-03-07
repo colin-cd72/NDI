@@ -173,6 +173,13 @@ function forceStopStream(sourceId) {
   if (onStateChange) onStateChange();
 }
 
+function forceStopAllStreams() {
+  for (const sourceId of [...activeStreams.keys()]) {
+    stopStream(sourceId);
+  }
+  if (onStateChange) onStateChange();
+}
+
 function forceKickViewer(sourceId, viewerId) {
   releaseStream(sourceId, viewerId);
   if (onStateChange) onStateChange();
@@ -193,5 +200,6 @@ module.exports = {
   getActiveStreams,
   getDetailedStreams,
   forceStopStream,
+  forceStopAllStreams,
   forceKickViewer
 };
