@@ -204,7 +204,7 @@ function broadcastToViewers(msg) {
   }
 }
 
-// Heartbeat interval to detect dead connections
+// Heartbeat interval to detect dead connections + orphan sweep
 function startHeartbeat(wss) {
   setInterval(() => {
     wss.clients.forEach((ws) => {
@@ -212,6 +212,16 @@ function startHeartbeat(wss) {
       ws.isAlive = false;
       ws.ping();
     });
+
+    // Sweep: find viewer IDs that are in activeStreams but have no live WS connection
+    const connectedViewerIds = new Set();
+    for (const client of viewerClients) {
+      if (client.readyState === 1) {
+        const viewerId = client.sessionID || client.userId;
+        connectedViewerIds.add(viewerId);
+      }
+    }
+    streamController.sweepOrphanedViewers(connectedViewerIds);
   }, 30000);
 }
 

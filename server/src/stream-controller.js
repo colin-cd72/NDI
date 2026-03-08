@@ -202,6 +202,28 @@ function getDetailedStreams() {
   return result;
 }
 
+// Remove viewers from activeStreams that no longer have a live WS connection.
+// This catches ghost viewers left by unreliable beforeunload / sendBeacon / WS race conditions.
+function sweepOrphanedViewers(connectedViewerIds) {
+  let swept = false;
+  for (const [sourceId, stream] of activeStreams) {
+    const orphans = [];
+    for (const viewerId of stream.viewers) {
+      if (!connectedViewerIds.has(viewerId)) {
+        orphans.push(viewerId);
+      }
+    }
+    for (const viewerId of orphans) {
+      const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
+      const username = viewerNames.get(viewerId) || viewerId;
+      console.log(`[Sweep] Orphaned viewer "${username}" removed from "${sourceName}"`);
+      releaseStream(sourceId, viewerId);
+      swept = true;
+    }
+  }
+  if (swept && onStateChange) onStateChange();
+}
+
 function forceStopStream(sourceId) {
   const sourceName = sources.has(sourceId) ? sources.get(sourceId).name : sourceId;
   console.log(`[Admin] Force stop: "${sourceName}"`);
@@ -241,5 +263,6 @@ module.exports = {
   getDetailedStreams,
   forceStopStream,
   forceStopAllStreams,
-  forceKickViewer
+  forceKickViewer,
+  sweepOrphanedViewers
 };
