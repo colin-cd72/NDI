@@ -6,7 +6,7 @@ function createMediaServer() {
     rtmp: {
       port: parseInt(process.env.RTMP_PORT) || 1935,
       chunk_size: 60000,
-      gop_cache: false, // Disable GOP cache for lower latency
+      gop_cache: true, // Cache last GOP so late-joining viewers get an immediate keyframe
       ping: 30,
       ping_timeout: 60
     },
